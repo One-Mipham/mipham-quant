@@ -1,7 +1,9 @@
-import { app, BrowserWindow, screen } from 'electron'
+import { app, BrowserWindow, screen, ipcMain } from 'electron'
 import * as path from 'path'
+import { BackendManager } from './backend'
 
 let mainWindow: BrowserWindow | null = null
+const backend = new BackendManager()
 
 function createWindow(): void {
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
@@ -38,12 +40,31 @@ function createWindow(): void {
   })
 }
 
-app.whenReady().then(createWindow)
+// Start backend before creating window
+async function bootstrap(): Promise<void> {
+  try {
+    await backend.start()
+  } catch (err) {
+    console.error('Failed to start backend:', err)
+    // Show error in window later
+  }
+
+  createWindow()
+
+  // IPC handlers
+  ipcMain.handle('backend:status', () => backend.isReady)
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+  ipcMain.handle('app:getPlatform', () => process.platform)
+}
+
+app.whenReady().then(bootstrap)
+
+app.on('before-quit', async () => {
+  await backend.stop()
+})
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  // Don't quit on window close — keep running in tray (Task 9)
 })
 
 app.on('activate', () => {
