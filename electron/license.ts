@@ -21,7 +21,13 @@ import { app } from 'electron'
 //   2. Copy the output (-----BEGIN PUBLIC KEY----- ... -----END PUBLIC KEY-----)
 //   3. Paste it below, replacing this placeholder.
 const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-<PASTE THE REAL PUBLIC KEY HERE — SEE INSTRUCTIONS ABOVE>
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwv3RlWEVg1U0gIrbFiA6
+aKlWnIUDlGdNE57YsZRt3UZtQzlOvNBmXvtkqQybbhUZ9tEmC4HORzf2nTYRMEM4
+5o2Y3xYZal4tN86JtCJH9YFVo00wYc/v3S55tph6iAd0qrig2miTrChUcGyI2UtO
+8mkQvexnZg6/hXKpuwnBXvLSDa84Mq3UJhUeQUQP7nZ3Fp2FY86+OtX3orQQJBKQ
+qwoZORiPAzA/zKh7mrvsYwnHgonmvEYywzOsyQdrYjb9oyDmsuat/BejD8q0+a1k
+AtISYRwyjV3ltqSPWJNVFwqVT5q5EmHvth8861SGj2WacLSHnnjBX0OuOypBM3G3
+NwIDAQAB
 -----END PUBLIC KEY-----`
 
 interface LicensePayload {
