@@ -42,7 +42,7 @@
       </a-layout-content>
 
       <a-layout-footer style="text-align:center;">
-        Mipham Quant v0.2.0 ©2026 One Mipham Corporation
+        Mipham Quant Desktop v1.0.0 ©2026 One Mipham Corporation
       </a-layout-footer>
     </a-layout>
   </a-layout>

@@ -5,6 +5,8 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+  // Use relative paths for file:// protocol compatibility
+  base: './',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
@@ -14,7 +16,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:5010',
+        target: 'http://127.0.0.1:5000',
         changeOrigin: true,
       },
     },
