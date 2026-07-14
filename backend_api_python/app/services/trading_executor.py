@@ -74,14 +74,11 @@ class TradingExecutor:
                 cursor = db.cursor()
                 col_names = set()
 
-                # PostgreSQL: 使用 information_schema 查询列
+                # SQLite-compatible: use PRAGMA table_info instead of information_schema
                 try:
-                    cursor.execute("""
-                        SELECT column_name FROM information_schema.columns 
-                        WHERE table_name = 'qd_strategy_positions'
-                    """)
+                    cursor.execute("PRAGMA table_info('qd_strategy_positions')")
                     cols = cursor.fetchall() or []
-                    col_names = {c.get("column_name") or c.get("COLUMN_NAME") for c in cols if isinstance(c, dict)}
+                    col_names = {c.get("name") for c in cols if isinstance(c, dict)}
                 except Exception:
                     col_names = set()
 
@@ -103,7 +100,11 @@ class TradingExecutor:
 
                 cursor.close()
         except Exception as e:
-            logger.error(f"Failed to check/ensure DB columns: {e!s}")
+            err_msg = str(e)
+            if "duplicate column name" in err_msg.lower():
+                logger.info(f"DB column already exists (harmless): {err_msg}")
+            else:
+                logger.error(f"Failed to check/ensure DB columns: {err_msg}")
 
     def _normalize_trade_symbol(self, exchange: Any, symbol: str, market_type: str, exchange_id: str) -> str:
         """

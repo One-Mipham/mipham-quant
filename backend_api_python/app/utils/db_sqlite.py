@@ -3,10 +3,23 @@ SQLite Database Adapter for Desktop Edition.
 
 Implements the same interface as db_postgres.py so calling code
 requires zero changes. Switched via DB_TYPE=sqlite environment variable.
+
+Auto-translates PostgreSQL SQL to SQLite at query execution time:
+    NOW()          → datetime('now')
+    %s             → ?
+    ILIKE          → LIKE
+    SERIAL         → INTEGER PRIMARY KEY AUTOINCREMENT
+    DOUBLE PRECISION → REAL
+    DECIMAL(p,s)   → REAL
+    VARCHAR(n)     → TEXT
+    TIMESTAMP      → TEXT
+    BOOLEAN        → INTEGER
+    JSONB          → TEXT
 """
 
 import json
 import os
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -15,6 +28,173 @@ from typing import Any
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Minimal SQL translation: only convert psycopg2 %s placeholders to SQLite ?
+# ---------------------------------------------------------------------------
+
+
+def _translate_sql(query: str) -> str:
+    """Translate PostgreSQL SQL to SQLite-compatible SQL.
+
+    Handles:
+    - %s → ? (psycopg2 → sqlite3 parameter placeholder)
+    - DDL types: SERIAL, VARCHAR, DECIMAL, TIMESTAMP, BOOLEAN, JSONB
+    - NOW() → (datetime('now'))
+    - ILIKE → LIKE
+    - INTERVAL expressions → datetime() modifiers
+    - ::type casts → removed
+    - RETURNING clause → removed
+    """
+    if not query or not isinstance(query, str):
+        return query
+
+    result = query
+
+    # -- INTERVAL translation (BEFORE %s→? so %s inside INTERVAL is handled) --
+    # Pattern A: NOW() +/- INTERVAL '%s <unit>'  (placeholder inside interval)
+    #   → datetime('now', '+' || %s || ' <unit>')
+    result = re.sub(
+        r"\bNOW\s*\(\s*\)\s*\+\s*INTERVAL\s+'%s\s+(\w+)'",
+        r"datetime('now', '+' || %s || ' \1')",
+        result, flags=re.IGNORECASE,
+    )
+    result = re.sub(
+        r"\bNOW\s*\(\s*\)\s*-\s*INTERVAL\s+'%s\s+(\w+)'",
+        r"datetime('now', '-' || %s || ' \1')",
+        result, flags=re.IGNORECASE,
+    )
+    # Pattern B: column +/- INTERVAL '%s <unit>' (generic, no NOW())
+    #   → datetime(column, '+' || %s || ' <unit>')
+    #   This is complex; handled case-by-case below.
+    #   For now, the common pattern is with NOW().
+
+    # Pattern C: NOW() +/- INTERVAL '<N> <unit>'  (f-string inlined literal)
+    #   → datetime('now', '+N <unit>')
+    result = re.sub(
+        r"\bNOW\s*\(\s*\)\s*\+\s*INTERVAL\s+'(\d+)\s+(\w+)'",
+        r"datetime('now', '+\1 \2')",
+        result, flags=re.IGNORECASE,
+    )
+    result = re.sub(
+        r"\bNOW\s*\(\s*\)\s*-\s*INTERVAL\s+'(\d+)\s+(\w+)'",
+        r"datetime('now', '-\1 \2')",
+        result, flags=re.IGNORECASE,
+    )
+
+    # Pattern D: column OP NOW() +/- INTERVAL '<N> <unit>'  (column comparison)
+    #   datetime('now', '-N <unit>') is a string that SQLite can compare.
+    result = re.sub(
+        r"\bNOW\s*\(\s*\)\s*-\s*INTERVAL\s+'(\d+)\s+(\w+)'",
+        r"datetime('now', '-\1 \2')",
+        result, flags=re.IGNORECASE,
+    )
+
+    # Parameter placeholder (safe: %s only appears in SQL, not in string data)
+    result = result.replace("%s", "?")
+
+    # DDL type translations (only in CREATE/ALTER context — safe)
+    result = re.sub(r"\bSERIAL\s+PRIMARY\s+KEY\b", "INTEGER PRIMARY KEY AUTOINCREMENT", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bBIGSERIAL\s+PRIMARY\s+KEY\b", "INTEGER PRIMARY KEY AUTOINCREMENT", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bSERIAL\b", "INTEGER", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bBIGSERIAL\b", "INTEGER", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bDOUBLE\s+PRECISION\b", "REAL", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bDECIMAL\s*\(\s*\d+\s*,\s*\d+\s*\)", "REAL", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bDECIMAL\b", "REAL", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bVARCHAR\s*\(\s*\d+\s*\)", "TEXT", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bBOOLEAN\b", "INTEGER", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bJSONB\b", "TEXT", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bTIMESTAMPTZ\b", "TEXT", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bTIMESTAMP\s+WITH\s+TIME\s+ZONE\b", "TEXT", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bTIMESTAMP\b", "TEXT", result, flags=re.IGNORECASE)
+
+    # NOW() → (datetime('now'))  — parentheses required for DEFAULT clauses
+    result = re.sub(r"\bNOW\s*\(\s*\)", "(datetime('now'))", result, flags=re.IGNORECASE)
+
+    # ILIKE → LIKE
+    result = re.sub(r"\bILIKE\b", "LIKE", result)
+
+    # Remove ::type casts (e.g. "column::INTEGER" → "column")
+    result = re.sub(r"::\s*\w+(\s*\[\s*\])?", "", result)
+
+    # Remove RETURNING clauses (SQLite uses lastrowid)
+    result = re.sub(r"\bRETURNING\s+\w+(\s*,\s*\w+)*\s*", "", result, flags=re.IGNORECASE)
+
+    # ADD COLUMN IF NOT EXISTS → ADD COLUMN
+    result = re.sub(r"\bADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\b", "ADD COLUMN", result, flags=re.IGNORECASE)
+
+    # DO $$ ... END $$ blocks → no-op (PostgreSQL procedural, SQLite doesn't support)
+    result = re.sub(r"\bDO\s+\$\$.*?END\s*\$\$", "SELECT 1", result, flags=re.IGNORECASE | re.DOTALL)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Translatable Connection/Cursor — sqlite3 subclasses with PG→SQLite translation
+# ---------------------------------------------------------------------------
+
+
+class _TranslatableCursor:
+    """Wraps a real sqlite3.Cursor — translates SQL and converts Row→dict.
+
+    We use a wrapper rather than a sqlite3.Cursor subclass because we need to
+    convert sqlite3.Row to plain dict for JSON serialization (Flask jsonify).
+    """
+
+    def __init__(self, raw: sqlite3.Cursor):
+        self._cur = raw
+
+    def execute(self, query, parameters=None):
+        translated = _translate_sql(str(query) if query else "")
+        if parameters is None:
+            return self._cur.execute(translated)
+        return self._cur.execute(translated, parameters)
+
+    def executemany(self, query, seq_of_parameters):
+        translated = _translate_sql(str(query) if query else "")
+        return self._cur.executemany(translated, seq_of_parameters)
+
+    def fetchone(self):
+        row = self._cur.fetchone()
+        return dict(row) if row is not None else None
+
+    def fetchmany(self, size=None):
+        rows = self._cur.fetchmany(size) if size else self._cur.fetchmany()
+        return [dict(r) for r in rows]
+
+    def fetchall(self):
+        return [dict(r) for r in self._cur.fetchall()]
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    @property
+    def lastrowid(self):
+        return self._cur.lastrowid
+
+    @property
+    def description(self):
+        return self._cur.description
+
+    def close(self):
+        return self._cur.close()
+
+    def __iter__(self):
+        for row in self._cur:
+            yield dict(row)
+
+
+class _TranslatableConnection(sqlite3.Connection):
+    """sqlite3.Connection subclass that returns _TranslatableCursor objects.
+
+    Being a true subclass (not a wrapper) means executescript(), commit(),
+    rollback(), and all other connection-level operations work natively.
+    """
+
+    def cursor(self, factory=None):
+        raw = super().cursor()
+        return _TranslatableCursor(raw)
 
 # Default DB path: same directory as this file's grandparent (backend_api_python/)
 # In production, set DB_PATH env var to Electron's userData directory.
@@ -36,12 +216,16 @@ def _ensure_db_dir():
         os.makedirs(db_dir, exist_ok=True)
 
 
-def _get_connection() -> sqlite3.Connection:
-    """Get or create a thread-local SQLite connection."""
+def _get_connection() -> _TranslatableConnection:
+    """Get or create a thread-local SQLite connection with PG→SQLite translation."""
     conn = getattr(_local, "connection", None)
     if conn is None:
         _ensure_db_dir()
-        conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        conn = sqlite3.connect(
+            _DB_PATH,
+            check_same_thread=False,
+            factory=_TranslatableConnection,
+        )
         conn.row_factory = sqlite3.Row  # dict-like access
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
@@ -117,6 +301,11 @@ def init_database():
 
     with get_db_connection() as db:
         db.executescript(init_sql)
+        # Always apply the embedded schema too — it may contain additional
+        # tables that the on-disk schema doesn't have (extended desktop tables).
+        # IF NOT EXISTS makes this idempotent.
+        if init_sql is not _EMBEDDED_SCHEMA:
+            db.executescript(_EMBEDDED_SCHEMA)
 
     logger.info("SQLite database initialized successfully")
 
@@ -195,6 +384,11 @@ CREATE TABLE IF NOT EXISTS qd_users (
     avatar TEXT DEFAULT '/avatar2.jpg',
     role TEXT DEFAULT 'admin',
     status TEXT DEFAULT 'active',
+    credits REAL DEFAULT 0,
+    vip_expires_at TEXT,
+    vip_plan TEXT DEFAULT '',
+    vip_is_lifetime INTEGER DEFAULT 0,
+    vip_monthly_credits_last_grant TEXT,
     email_verified INTEGER DEFAULT 1,
     token_version INTEGER DEFAULT 1,
     timezone TEXT DEFAULT '',
@@ -209,18 +403,30 @@ CREATE TABLE IF NOT EXISTS qd_users (
 CREATE TABLE IF NOT EXISTS qd_indicator_codes (
     id INTEGER PRIMARY KEY,
     user_id INTEGER NOT NULL DEFAULT 1,
+    is_buy INTEGER DEFAULT 0 NOT NULL,
+    end_time INTEGER DEFAULT 1 NOT NULL,
     name TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
     description TEXT DEFAULT '',
-    code TEXT NOT NULL,
     language TEXT DEFAULT 'python',
     category TEXT DEFAULT 'custom',
     version INTEGER DEFAULT 1,
     publish_to_community INTEGER DEFAULT 0,
+    pricing_type TEXT DEFAULT 'free',
+    price REAL DEFAULT 0,
+    is_encrypted INTEGER DEFAULT 0,
+    preview_image TEXT DEFAULT '',
+    vip_free INTEGER DEFAULT 0,
+    createtime INTEGER,
+    updatetime INTEGER,
     review_status TEXT DEFAULT 'approved',
     review_note TEXT DEFAULT '',
     reviewed_by INTEGER,
     reviewed_at TEXT,
-    updatetime TEXT,
+    purchase_count INTEGER DEFAULT 0,
+    avg_rating REAL DEFAULT 0,
+    rating_count INTEGER DEFAULT 0,
+    view_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES qd_users(id)
@@ -346,6 +552,287 @@ CREATE TABLE IF NOT EXISTS qd_license (
     expires_at TEXT,
     features TEXT DEFAULT '["all"]',
     activated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- =============================================================================
+-- Extended tables for desktop edition (critical for strategy/trading/analysis)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS qd_strategies_trading (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    strategy_name TEXT NOT NULL,
+    strategy_type TEXT DEFAULT 'IndicatorStrategy',
+    market_category TEXT DEFAULT 'Crypto',
+    execution_mode TEXT DEFAULT 'signal',
+    notification_config TEXT DEFAULT '',
+    status TEXT DEFAULT 'stopped',
+    symbol TEXT,
+    timeframe TEXT,
+    initial_capital REAL DEFAULT 1000,
+    leverage INTEGER DEFAULT 1,
+    market_type TEXT DEFAULT 'swap',
+    exchange_config TEXT,
+    indicator_config TEXT,
+    trading_config TEXT,
+    ai_model_config TEXT,
+    decide_interval INTEGER DEFAULT 300,
+    strategy_group_id TEXT DEFAULT '',
+    group_base_name TEXT DEFAULT '',
+    strategy_mode TEXT DEFAULT 'signal',
+    strategy_code TEXT DEFAULT '',
+    last_rebalance_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS qd_strategy_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    strategy_id INTEGER REFERENCES qd_strategies_trading(id) ON DELETE CASCADE,
+    symbol TEXT,
+    side TEXT,
+    size REAL,
+    entry_price REAL,
+    current_price REAL,
+    highest_price REAL DEFAULT 0,
+    lowest_price REAL DEFAULT 0,
+    unrealized_pnl REAL DEFAULT 0,
+    pnl_percent REAL DEFAULT 0,
+    equity REAL DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(strategy_id, symbol, side)
+);
+
+CREATE TABLE IF NOT EXISTS qd_strategy_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    strategy_id INTEGER REFERENCES qd_strategies_trading(id) ON DELETE CASCADE,
+    symbol TEXT,
+    type TEXT,
+    price REAL,
+    amount REAL,
+    value REAL,
+    commission REAL DEFAULT 0,
+    commission_ccy TEXT DEFAULT '',
+    profit REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS pending_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    strategy_id INTEGER REFERENCES qd_strategies_trading(id) ON DELETE SET NULL,
+    symbol TEXT NOT NULL,
+    signal_type TEXT NOT NULL,
+    signal_ts INTEGER,
+    market_type TEXT DEFAULT 'swap',
+    order_type TEXT DEFAULT 'market',
+    amount REAL DEFAULT 0,
+    price REAL DEFAULT 0,
+    execution_mode TEXT DEFAULT 'signal',
+    status TEXT DEFAULT 'pending',
+    priority INTEGER DEFAULT 0,
+    attempts INTEGER DEFAULT 0,
+    max_attempts INTEGER DEFAULT 10,
+    last_error TEXT DEFAULT '',
+    payload_json TEXT DEFAULT '',
+    dispatch_note TEXT DEFAULT '',
+    exchange_id TEXT DEFAULT '',
+    exchange_order_id TEXT DEFAULT '',
+    exchange_response_json TEXT DEFAULT '',
+    filled REAL DEFAULT 0,
+    avg_price REAL DEFAULT 0,
+    error_msg TEXT DEFAULT '',
+    executed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    processed_at TEXT,
+    sent_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS qd_strategy_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    strategy_id INTEGER,
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT DEFAULT '',
+    is_read INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS qd_strategy_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_id INTEGER NOT NULL DEFAULT 0,
+    level TEXT DEFAULT 'INFO',
+    message TEXT DEFAULT '',
+    timestamp TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS qd_manual_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    market TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    name TEXT DEFAULT '',
+    side TEXT DEFAULT 'long',
+    quantity REAL NOT NULL DEFAULT 0,
+    entry_price REAL NOT NULL DEFAULT 0,
+    entry_time INTEGER,
+    notes TEXT DEFAULT '',
+    tags TEXT DEFAULT '',
+    group_name TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, market, symbol, side, group_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_positions_user_id ON qd_manual_positions(user_id);
+
+CREATE TABLE IF NOT EXISTS qd_position_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    position_id INTEGER,
+    market TEXT DEFAULT '',
+    symbol TEXT DEFAULT '',
+    alert_type TEXT NOT NULL,
+    threshold REAL NOT NULL DEFAULT 0,
+    notification_config TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    is_triggered INTEGER DEFAULT 0,
+    last_triggered_at TEXT,
+    trigger_count INTEGER DEFAULT 0,
+    repeat_interval INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS qd_position_monitors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1 REFERENCES qd_users(id) ON DELETE CASCADE,
+    name TEXT DEFAULT '',
+    position_ids TEXT DEFAULT '',
+    monitor_type TEXT DEFAULT 'ai',
+    config TEXT DEFAULT '',
+    notification_config TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    last_run_at TEXT,
+    next_run_at TEXT,
+    last_result TEXT DEFAULT '',
+    run_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS qd_ai_calibration (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market TEXT NOT NULL DEFAULT 'Crypto',
+    timeframe TEXT NOT NULL DEFAULT '1D',
+    signal_type TEXT NOT NULL DEFAULT 'buy',
+    confidence REAL NOT NULL DEFAULT 0,
+    buy_threshold REAL,
+    sell_threshold REAL,
+    min_consensus_abs_override REAL,
+    quality_hold_threshold REAL,
+    actual_outcome INTEGER DEFAULT 0,
+    predicted_at TEXT DEFAULT (datetime('now')),
+    outcome_at TEXT,
+    validated_at TEXT,
+    created_at TEXT,
+    meta TEXT DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS qd_analysis_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    market TEXT NOT NULL DEFAULT 'Crypto',
+    symbol TEXT NOT NULL DEFAULT '',
+    signal_type TEXT NOT NULL DEFAULT 'buy',
+    decision TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 0,
+    price_at_analysis REAL,
+    summary TEXT DEFAULT '',
+    reasons TEXT DEFAULT '{}',
+    scores TEXT DEFAULT '{}',
+    indicators_snapshot TEXT DEFAULT '{}',
+    raw_result TEXT DEFAULT '{}',
+    consensus_score REAL,
+    consensus_abs REAL,
+    agreement_ratio REAL,
+    quality_multiplier REAL,
+    result TEXT DEFAULT '',
+    is_validated INTEGER DEFAULT 0,
+    meta TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')),
+    validated_at TEXT,
+    actual_outcome TEXT DEFAULT '',
+    actual_return_pct REAL
+);
+
+CREATE TABLE IF NOT EXISTS qd_backtest_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL DEFAULT 0,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    symbol TEXT NOT NULL DEFAULT '',
+    signal_type TEXT NOT NULL DEFAULT '',
+    entry_time TEXT,
+    exit_time TEXT,
+    entry_price REAL DEFAULT 0,
+    exit_price REAL DEFAULT 0,
+    amount REAL DEFAULT 0,
+    profit REAL DEFAULT 0,
+    profit_pct REAL DEFAULT 0,
+    meta TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS qd_backtest_equity_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL DEFAULT 0,
+    timestamp TEXT NOT NULL DEFAULT '',
+    equity REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS qd_backtest_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    indicator_id INTEGER,
+    strategy_id INTEGER,
+    run_type TEXT DEFAULT 'single',
+    status TEXT DEFAULT 'running',
+    symbol TEXT,
+    market TEXT DEFAULT 'Crypto',
+    timeframe TEXT DEFAULT '1D',
+    start_date TEXT,
+    end_date TEXT,
+    initial_capital REAL DEFAULT 10000,
+    final_equity REAL,
+    total_return REAL,
+    max_drawdown REAL,
+    sharpe_ratio REAL,
+    win_rate REAL,
+    total_trades INTEGER DEFAULT 0,
+    config TEXT DEFAULT '{}',
+    result TEXT DEFAULT '{}',
+    error_msg TEXT DEFAULT '',
+    started_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS qd_analysis_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    market TEXT DEFAULT 'Crypto',
+    symbol TEXT DEFAULT '',
+    task_type TEXT DEFAULT 'analysis',
+    status TEXT DEFAULT 'pending',
+    priority INTEGER DEFAULT 0,
+    result TEXT DEFAULT '{}',
+    error_msg TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
 );
 
 INSERT OR IGNORE INTO qd_users (id, username, nickname, role, status)
