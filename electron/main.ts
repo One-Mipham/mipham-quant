@@ -2,6 +2,7 @@ import { app, BrowserWindow, screen, ipcMain } from 'electron'
 import * as path from 'path'
 import { BackendManager } from './backend'
 import { activateLicense, checkLicense, getLicenseInfo } from './license'
+import { createTray, showNotification } from './tray'
 
 let mainWindow: BrowserWindow | null = null
 const backend = new BackendManager()
@@ -36,6 +37,15 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'))
   }
 
+  // Close = hide to tray (not quit)
+  mainWindow.on('close', (event) => {
+    if (!(app as any).isQuitting) {
+      event.preventDefault()
+      mainWindow!.hide()
+      showNotification('Mipham Quant', '应用已最小化到系统托盘，策略继续运行中。')
+    }
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -52,6 +62,14 @@ async function bootstrap(): Promise<void> {
 
   createWindow()
 
+  // Create system tray
+  createTray(mainWindow!)
+
+  // Notify renderer when backend is ready
+  if (mainWindow) {
+    mainWindow.webContents.send('backend:ready')
+  }
+
   // IPC handlers
   ipcMain.handle('backend:status', () => backend.isReady)
   ipcMain.handle('app:getVersion', () => app.getVersion())
@@ -66,6 +84,15 @@ async function bootstrap(): Promise<void> {
       activated: checkLicense(),
       info: getLicenseInfo(),
     }
+  })
+
+  // Forward tray commands to renderer
+  ipcMain.on('tray:pauseAll', () => {
+    showNotification('Mipham Quant', '所有策略已暂停')
+  })
+
+  ipcMain.on('tray:resumeAll', () => {
+    showNotification('Mipham Quant', '所有策略已恢复')
   })
 }
 
