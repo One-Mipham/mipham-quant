@@ -31,14 +31,27 @@ export class BackendManager {
       cmd = 'python3'
       args = [path.join(__dirname, '..', 'backend_api_python', 'run.py')]
     } else {
-      // Production: PyInstaller binary in extraResources
+      // Production: try PyInstaller binary first, fall back to python3 + source
       const backendDir = path.join(process.resourcesPath, 'backend')
-      if (process.platform === 'win32') {
-        cmd = path.join(backendDir, 'mipham-quant-backend.exe')
+      const binaryName = process.platform === 'win32'
+        ? 'mipham-quant-backend.exe'
+        : 'mipham-quant-backend'
+      const binaryPath = path.join(backendDir, binaryName)
+      const runScript = path.join(backendDir, 'run_desktop.sh')
+
+      const fs = require('fs')
+      // Prefer python3 + source (PyInstaller has compatibility issues on some macOS)
+      const runPy = path.join(backendDir, 'run.py')
+      if (fs.existsSync(runPy)) {
+        cmd = 'python3'
+        args = [runPy]
+      } else if (fs.existsSync(binaryPath)) {
+        cmd = binaryPath
+        args = []
       } else {
-        cmd = path.join(backendDir, 'mipham-quant-backend')
+        console.error('[Backend] No backend found!')
+        return
       }
-      args = []
     }
 
     const env = {

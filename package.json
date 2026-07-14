@@ -11,8 +11,8 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "electron:dev": "NODE_ENV=development tsc -p electron/tsconfig.json && echo \"{\"type\": \"commonjs\"}\" > dist-electron/package.json && electron .",
-    "electron:build:ts": "tsc -p electron/tsconfig.json && echo \"{\"type\": \"commonjs\"}\" > dist-electron/package.json",
+    "electron:dev": "NODE_ENV=development tsc -p electron/tsconfig.json && printf '{\"type\": \"commonjs\"}\\n' > dist-electron/package.json && electron .",
+    "electron:build:ts": "tsc -p electron/tsconfig.json && printf '{\"type\": \"commonjs\"}\\n' > dist-electron/package.json",
     "electron:build:frontend": "cd apps/frontend && pnpm build",
     "electron:build": "pnpm electron:build:ts && pnpm electron:build:frontend && electron-builder",
     "electron:build:mac": "pnpm electron:build:ts && pnpm electron:build:frontend && electron-builder --mac",
@@ -21,6 +21,7 @@
   "build": {
     "appId": "com.onemipham.mipham-quant",
     "productName": "Mipham Quant",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
@@ -33,6 +34,22 @@
       {
         "from": "backend_api_python/dist/",
         "to": "backend/"
+      },
+      {
+        "from": "backend_api_python/run.py",
+        "to": "backend/run.py"
+      },
+      {
+        "from": "backend_api_python/run_desktop.sh",
+        "to": "backend/run_desktop.sh"
+      },
+      {
+        "from": "backend_api_python/app",
+        "to": "backend/app"
+      },
+      {
+        "from": "backend_api_python/migrations",
+        "to": "backend/migrations"
       }
     ],
     "mac": {

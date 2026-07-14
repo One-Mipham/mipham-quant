@@ -127,7 +127,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: apps/frontend/dist/
+          path: frontend/dist/
 
   # =========================================================================
   # Docker build check

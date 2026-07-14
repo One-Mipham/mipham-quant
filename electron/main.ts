@@ -77,30 +77,38 @@ async function bootstrap(): Promise<void> {
     showNotification('Mipham Quant', '所有策略已恢复')
   })
 
-  // Check license before starting backend
-  if (!isActivated()) {
-    // Show activation dialog
+  // Start backend and show main window
+  async function startBackend() {
+    try {
+      await backend.start()
+      // Notify renderer when backend is ready
+      if (mainWindow) {
+        mainWindow.webContents.send('backend:ready')
+      }
+    } catch (err) {
+      console.error('Failed to start backend:', err)
+    }
+  }
+
+  // Handle license activation — restart backend after activation
+  ipcMain.handle('license:restart-backend', async () => {
+    await startBackend()
+    return true
+  })
+
+  // License check — enabled only when LICENSE_REQUIRED=1
+  const skipLicense = !process.env.LICENSE_REQUIRED || process.env.LICENSE_REQUIRED !== '1'
+  if (!skipLicense && !isActivated()) {
+    // Show activation dialog, backend starts after license:restart-backend IPC
     createWindow()
     mainWindow?.webContents.on('did-finish-load', () => {
       mainWindow?.webContents.send('license:required')
     })
-    return
-  }
-
-  // Start backend and show main window
-  try {
-    await backend.start()
-  } catch (err) {
-    console.error('Failed to start backend:', err)
-  }
-  createWindow()
-
-  // Create system tray
-  createTray(mainWindow!)
-
-  // Notify renderer when backend is ready
-  if (mainWindow) {
-    mainWindow.webContents.send('backend:ready')
+  } else {
+    await startBackend()
+    createWindow()
+    // Create system tray
+    createTray(mainWindow!)
   }
 }
 
