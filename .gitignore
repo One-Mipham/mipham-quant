@@ -51,3 +51,4 @@ credentials/
 # License keys (NEVER commit private key)
 license_private.pem
 license_public.pem
+node_modules/
