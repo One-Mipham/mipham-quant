@@ -129,6 +129,13 @@ def login_required(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Desktop single-user mode: skip authentication
+        if _is_single_user_mode():
+            g.user = "trader"
+            g.user_id = 1
+            g.user_role = "admin"
+            return f(*args, **kwargs)
+
         token = None
 
         # Read token from Authorization: Bearer <token>
@@ -227,8 +234,8 @@ def permission_required(permission: str):
 
 # Legacy compatibility: single-user mode fallback
 def _is_single_user_mode() -> bool:
-    """Check if system is in single-user (legacy) mode"""
-    return os.getenv("SINGLE_USER_MODE", "false").lower() == "true"
+    """Check if system is in single-user (legacy/desktop) mode"""
+    return Config.SINGLE_USER_MODE
 
 
 def authenticate_legacy(username: str, password: str) -> dict:

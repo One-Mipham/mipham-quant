@@ -10,7 +10,17 @@ class MetaConfig(type):
     # 服务启动参数通常由环境变量或命令行参数决定，不建议从数据库读取
 
     @property
+    def SINGLE_USER_MODE(cls):
+        # Desktop: single-user mode by default when DB_TYPE is sqlite
+        if os.getenv("DB_TYPE", "").lower() == "sqlite":
+            return True
+        return os.getenv("SINGLE_USER_MODE", "false").lower() == "true"
+
+    @property
     def HOST(cls):
+        # Desktop: force localhost binding
+        if os.getenv("DB_TYPE", "").lower() == "sqlite":
+            return "127.0.0.1"
         return os.getenv("PYTHON_API_HOST", "0.0.0.0")
 
     @property
@@ -32,7 +42,13 @@ class MetaConfig(type):
     # ==================== 认证配置 ====================
     @property
     def SECRET_KEY(cls):
-        return os.getenv("SECRET_KEY", "mipham-quant-secret-key-change-me")
+        # Desktop: auto-generate a random key if not set
+        key = os.getenv("SECRET_KEY", "").strip()
+        if not key:
+            import secrets
+            key = secrets.token_hex(32)
+            os.environ["SECRET_KEY"] = key
+        return key
 
     @property
     def ADMIN_USER(cls):

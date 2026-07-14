@@ -109,8 +109,12 @@ app = create_app()
 
 def main():
     """启动应用"""
-    # Keep startup messages ASCII-only and short.
-    print("Mipham Quant v0.1.0 — AI 量化交易平台")
+    db_type = os.getenv("DB_TYPE", "postgresql")
+    if db_type == "sqlite":
+        print("Mipham Quant Desktop v1.0.0 — 桌面版")
+        print(f"数据位置: {os.getenv('DB_PATH', 'data/quant.db')}")
+    else:
+        print("Mipham Quant v0.1.0 — AI 量化交易平台")
 
     # ========== Critical Security Check for SECRET_KEY ==========
     # In production (DEBUG=False), the SECRET_KEY MUST NOT use the default example value.
