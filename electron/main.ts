@@ -1,6 +1,7 @@
 import { app, BrowserWindow, screen, ipcMain } from 'electron'
 import * as path from 'path'
 import { BackendManager } from './backend'
+import { activateLicense, checkLicense, getLicenseInfo } from './license'
 
 let mainWindow: BrowserWindow | null = null
 const backend = new BackendManager()
@@ -55,6 +56,17 @@ async function bootstrap(): Promise<void> {
   ipcMain.handle('backend:status', () => backend.isReady)
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getPlatform', () => process.platform)
+
+  // License IPC handlers
+  ipcMain.handle('license:activate', (_event, key: string) => {
+    return activateLicense(key)
+  })
+  ipcMain.handle('license:status', () => {
+    return {
+      activated: checkLicense(),
+      info: getLicenseInfo(),
+    }
+  })
 }
 
 app.whenReady().then(bootstrap)

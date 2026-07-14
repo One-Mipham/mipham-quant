@@ -46,3 +46,7 @@ frontend/dist/maps/
 credentials/
 *.pem
 *.key
+
+# License keys (NEVER commit private key)
+license_private.pem
+license_public.pem
