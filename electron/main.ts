@@ -1,7 +1,7 @@
 import { app, BrowserWindow, screen, ipcMain } from 'electron'
 import * as path from 'path'
 import { BackendManager } from './backend'
-import { activateLicense, checkLicense, getLicenseInfo } from './license'
+import { activateLicense, checkLicense, getLicenseInfo, isActivated } from './license'
 import { createTray, showNotification } from './tray'
 
 let mainWindow: BrowserWindow | null = null
@@ -51,31 +51,13 @@ function createWindow(): void {
   })
 }
 
-// Start backend before creating window
 async function bootstrap(): Promise<void> {
-  try {
-    await backend.start()
-  } catch (err) {
-    console.error('Failed to start backend:', err)
-    // Show error in window later
-  }
-
-  createWindow()
-
-  // Create system tray
-  createTray(mainWindow!)
-
-  // Notify renderer when backend is ready
-  if (mainWindow) {
-    mainWindow.webContents.send('backend:ready')
-  }
-
-  // IPC handlers
+  // Register IPC handlers (always available)
   ipcMain.handle('backend:status', () => backend.isReady)
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getPlatform', () => process.platform)
 
-  // License IPC handlers
+  // License IPC handlers (always available for activation flow)
   ipcMain.handle('license:activate', (_event, key: string) => {
     return activateLicense(key)
   })
@@ -94,6 +76,32 @@ async function bootstrap(): Promise<void> {
   ipcMain.on('tray:resumeAll', () => {
     showNotification('Mipham Quant', '所有策略已恢复')
   })
+
+  // Check license before starting backend
+  if (!isActivated()) {
+    // Show activation dialog
+    createWindow()
+    mainWindow?.webContents.on('did-finish-load', () => {
+      mainWindow?.webContents.send('license:required')
+    })
+    return
+  }
+
+  // Start backend and show main window
+  try {
+    await backend.start()
+  } catch (err) {
+    console.error('Failed to start backend:', err)
+  }
+  createWindow()
+
+  // Create system tray
+  createTray(mainWindow!)
+
+  // Notify renderer when backend is ready
+  if (mainWindow) {
+    mainWindow.webContents.send('backend:ready')
+  }
 }
 
 app.whenReady().then(bootstrap)
