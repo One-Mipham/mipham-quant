@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="24" fill="#1a1a2e"/>
+  <text x="100" y="78" text-anchor="middle" fill="#00d4ff" font-size="30" font-family="sans-serif" font-weight="bold">Mipham</text>
+  <text x="100" y="125" text-anchor="middle" fill="#ffffff" font-size="36" font-family="sans-serif" font-weight="bold">Quant</text>
+  <line x1="40" y1="145" x2="160" y2="145" stroke="#00d4ff" stroke-width="2"/>
+</svg>

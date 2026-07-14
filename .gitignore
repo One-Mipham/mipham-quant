@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+quant_env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Docker
+docker-compose.override.yml
+
+# Environment
+.env
+backend_api_python/.env
+*.local
+
+# Data
+*.db
+*.sqlite
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+frontend/dist/maps/
+*.pyc
+
+# Sensitive
+credentials/
+*.pem
+*.key

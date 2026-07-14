@@ -1,0 +1,92 @@
+# Mipham Quant — Ruff Configuration
+# See: https://docs.astral.sh/ruff/settings/
+
+[tool.ruff]
+# Target Python version
+target-version = "py312"
+
+# Line length (match Prettier default)
+line-length = 120
+
+# Directories to exclude
+exclude = [
+    "*.egg-info",
+    ".git",
+    ".venv",
+    "__pycache__",
+    "dist",
+    "build",
+]
+
+[tool.ruff.lint]
+# Select rules to enforce
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort (import sorting)
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "PLC",  # pylint conventions
+    "PLW",  # pylint warnings
+    "PERF", # perflint
+    "C4",   # flake8-comprehensions
+    "RUF",  # ruff-specific rules
+]
+
+# Ignore specific rules that don't apply to this codebase
+ignore = [
+    "E501",   # line-too-long — handled by ruff format
+    "PLC0415", # import-outside-top-level — intentional lazy imports
+    "PLW0603", # global-statement — used in app factory singletons
+    "N802",    # invalid-function-name — upstream compat
+    "N806",    # non-lowercase-variable-in-function — upstream compat
+    "PERF203", # try-except-in-loop — acceptable for data fetching
+    "PERF401", # manual-list-comprehension — readability preference
+    "SIM102",  # collapsible-if — readability preference
+    "SIM105",  # suppressible-exception — acceptable for broad handlers
+    "SIM108",  # if-else-block-instead-of-if-exp — readability preference
+    "RUF001",  # ambiguous-unicode-character-string — Chinese chars in strings
+    "RUF002",  # ambiguous-unicode-character-docstring — Chinese chars in docs
+    "RUF003",  # ambiguous-unicode-character-comment — Chinese chars in comments
+    "RUF012",  # mutable-class-default — acceptable for factory patterns
+    "RUF013",  # implicit-optional — upstream compat
+    "PLW1508", # invalid-envvar-default — used for Config pattern
+    "B904",    # raise-without-from-inside-except — used broadly
+    "E402",    # module-import-not-at-top-of-file — intentional lazy imports + sys.path hacks
+    "E741",    # ambiguous-variable-name — `l` for low price in financial code
+    "W291",    # trailing-whitespace — handled by formatter
+    "W293",    # blank-line-with-whitespace — handled by formatter
+    "SIM101",  # multiple-isinstance-calls — readability preference
+    "SIM103",  # needless-bool — readability preference
+    "SIM110",  # reimplemented-builtin — readability preference
+    "SIM114",  # if-with-same-arms — readability preference
+    "SIM116",  # if-else-block-instead-of-dict-lookup — readability preference
+    "C414",    # unnecessary-double-cast-or-process — readability preference
+    "C416",    # unnecessary-comprehension — readability preference
+    "RUF005",  # collection-literal-concatenation — readability preference
+    "RUF007",  # zip-instead-of-pairwise — acceptable
+    "RUF022",  # unsorted-dunder-all — readability preference
+    "RUF046",  # unnecessary-cast-to-int — acceptable
+    "RUF057",  # unnecessary-round — acceptable
+    "RUF059",  # unused-unpacked-variable — acceptable for tuple unpacking
+    "PLW1641", # eq-without-hash — acceptable for simple data classes
+    "PLW2901", # redefined-loop-name — acceptable for small loops
+    "B005",    # strip-with-multi-characters — acceptable
+    "B905",    # zip-without-explicit-strict — acceptable
+    "N813",    # camelcase-imported-as-lowercase — MetaTrader5 special case
+    "PERF102", # incorrect-dict-iterator — readability preference
+]
+
+[tool.ruff.lint.isort]
+# Import sorting configuration
+known-first-party = ["app"]
+force-single-line = false
+
+[tool.ruff.format]
+# Format configuration
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false

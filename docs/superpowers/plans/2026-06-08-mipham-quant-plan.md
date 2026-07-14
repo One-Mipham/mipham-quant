@@ -1780,7 +1780,7 @@ A: "市场"页面搜索，或直接在策略中指定代码。
 ## 技术支持
 
 - 文档: https://github.com/sarvadaya/mipham-6-platforms
-- 邮箱: support@mipham.ai
+- 邮箱: support@onemipham.com
 ```
 
 - [ ] **Step 2: Update CHANGELOG for v0.1.0**

@@ -1,0 +1,14 @@
+Mipham Quant
+Copyright (c) 2026 One Mipham Corporation (北京华安麦逄科技有限公司)
+All rights reserved.
+
+Proprietary Software — Closed Source Commercial Software
+
+This software and its source code are the proprietary property of
+One Mipham Corporation. Reproduction, modification, distribution,
+or use of this software in any form is prohibited without explicit
+written authorization.
+
+This software contains code from QuantDinger (https://github.com/brokermr810/QuantDinger)
+licensed under Apache License 2.0.
+See backend_api_python/ for Apache 2.0 licensed components.

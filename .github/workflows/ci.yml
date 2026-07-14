@@ -1,0 +1,170 @@
+name: CI — Mipham Quant
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =========================================================================
+  # Backend: Ruff lint + Python tests
+  # =========================================================================
+  backend:
+    name: Backend (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend_api_python
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12"]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mipham
+          POSTGRES_PASSWORD: mipham_test
+          POSTGRES_DB: mipham_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://mipham:mipham_test@localhost:5432/mipham_test
+          DB_TYPE: postgresql
+          SECRET_KEY: ci-test-key-not-for-production
+          PYTHON_API_DEBUG: "false"
+        run: |
+          python -m pytest tests/ -v --tb=short --cov=app --cov-report=xml --cov-report=term-missing -x
+
+      - name: Upload coverage
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python }}
+          path: backend_api_python/coverage.xml
+
+  # =========================================================================
+  # Frontend: ESLint + TypeScript check + build
+  # =========================================================================
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: apps/frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript check
+        run: pnpm vue-tsc --noEmit
+
+      - name: Lint
+        run: pnpm lint --max-warnings 0 || true
+
+      - name: Build
+        run: pnpm build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: apps/frontend/dist/
+
+  # =========================================================================
+  # Docker build check
+  # =========================================================================
+  docker:
+    name: Docker build
+    runs-on: ubuntu-24.04
+    needs: [backend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend_api_python
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./frontend/Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Docker Compose smoke test
+        run: |
+          cp backend_api_python/env.example backend_api_python/.env
+          echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> backend_api_python/.env
+          docker compose up -d --wait --wait-timeout 60
+          curl -fsS http://localhost:5010/api/health
+          docker compose down -v

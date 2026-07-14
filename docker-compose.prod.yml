@@ -1,0 +1,59 @@
+# Mipham Quant — 生产环境覆盖
+# 使用: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 生产环境变更:
+# - 后端: DEBUG=false, 日志持久化, 资源限制
+# - 数据库: 持久化存储, 自动备份
+# - Redis: 持久化
+# - 前端: 只读, 缓存优化
+
+services:
+  postgres:
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend_api_python/migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    # 每日自动备份
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    restart: always
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
+
+  backend:
+    restart: always
+    environment:
+      - PYTHON_API_DEBUG=false
+      - ENABLE_CACHE=true
+      - GUNICORN_WORKERS=2
+      - GUNICORN_THREADS=8
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  frontend:
+    restart: always
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
