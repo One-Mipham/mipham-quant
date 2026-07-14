@@ -38,7 +38,8 @@ logs/
 Thumbs.db
 
 # Build
-dist-electron/
+dist-electron/*
+!dist-electron/package.json
 frontend/dist/maps/
 *.pyc
 
