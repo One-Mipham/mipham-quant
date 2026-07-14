@@ -5,6 +5,18 @@ Mipham Quant Python API entrypoint.
 import os
 import sys
 
+# PyInstaller: when running as a bundled executable, the binary is in a
+# temp directory. We need to find bundled data files relative to sys._MEIPASS.
+import sys as _sys
+if getattr(_sys, 'frozen', False):
+    # Running as PyInstaller bundle
+    _bundle_dir = _sys._MEIPASS
+    _sys.path.insert(0, _bundle_dir)
+    # Ensure the working directory is the user's data directory
+    _data_dir = os.path.join(os.path.expanduser("~"), ".mipham-quant")
+    os.makedirs(_data_dir, exist_ok=True)
+    os.chdir(_data_dir)
+
 # Ensure UTF-8 console output on Windows to avoid UnicodeEncodeError in logs.
 # (PowerShell default encoding may be GBK/CP936.)
 try:
