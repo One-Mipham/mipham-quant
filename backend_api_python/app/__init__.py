@@ -251,17 +251,18 @@ def create_app(config_name="default"):
 
     setup_logger()
 
-    # Initialize database and ensure admin user exists
+    # Initialize database (PostgreSQL or SQLite depending on DB_TYPE)
     try:
-        from app.utils.db import get_db_type, init_database
+        from app.utils.db import init_database, get_db_type
 
         logger.info(f"Database type: {get_db_type()}")
         init_database()
 
-        # Ensure admin user exists (multi-user mode)
-        from app.services.user_service import get_user_service
+        # Multi-user mode only for PostgreSQL; skip for SQLite desktop
+        if get_db_type() == "postgresql":
+            from app.services.user_service import get_user_service
 
-        get_user_service().ensure_admin_exists()
+            get_user_service().ensure_admin_exists()
     except Exception as e:
         logger.warning(f"Database initialization note: {e}")
 
