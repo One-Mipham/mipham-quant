@@ -1,29 +1,84 @@
 {
-  "name": "frontend",
+  "name": "mipham-quant-desktop",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.0.0",
+  "description": "Mipham Quant — AI Quantitative Trading Desktop",
+  "main": "dist-electron/main.js",
+  "author": "One Mipham Corporation",
+  "license": "Proprietary",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "NODE_ENV=development tsc -p electron/tsconfig.json && electron .",
+    "electron:build:ts": "tsc -p electron/tsconfig.json",
+    "electron:build:frontend": "cd apps/frontend && pnpm build",
+    "electron:build": "pnpm electron:build:ts && pnpm electron:build:frontend && electron-builder",
+    "electron:build:mac": "pnpm electron:build:ts && pnpm electron:build:frontend && electron-builder --mac",
+    "electron:build:win": "pnpm electron:build:ts && pnpm electron:build:frontend && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.onemipham.mipham-quant",
+    "productName": "Mipham Quant",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "frontend/dist/**/*",
+      "resources/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend_api_python/dist/",
+        "to": "backend/"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.finance",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "resources/icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "resources/icon.ico"
+    }
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
     "ant-design-vue": "^4.2.6",
     "axios": "^1.17.0",
     "echarts": "^6.1.0",
+    "electron-store": "^10.0.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.34",
     "vue-echarts": "^8.0.1",
     "vue-router": "^4.6.4"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "core-js"
+    ]
+  },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
-    "@types/node": "^24.12.3",
+    "@types/node": "^22.20.1",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/tsconfig": "^0.9.1",
-    "typescript": "~6.0.2",
+    "electron": "^34.5.8",
+    "electron-builder": "^25.1.8",
+    "typescript": "~5.7.3",
     "vite": "^8.0.12",
     "vue-tsc": "^3.2.8"
   }
