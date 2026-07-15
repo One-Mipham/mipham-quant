@@ -31,6 +31,7 @@ if _db_type == "sqlite":
         get_pg_connection_sync,
         init_database,
     )
+
     # Compatibility alias — some callers use the postgres naming
     get_db_connection_sync = get_pg_connection_sync  # type: ignore
 
@@ -46,6 +47,7 @@ else:
         get_pg_connection,
         get_pg_connection_sync,
     )
+
     # Compatibility aliases — most callers use the generic names
     get_db_connection = get_pg_connection  # type: ignore
     get_db_connection_sync = get_pg_connection_sync  # type: ignore
