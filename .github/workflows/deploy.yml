@@ -37,7 +37,9 @@ jobs:
             set -e
             cd /opt/mipham-quant
 
-            # Pull latest code (first-run: init git repo if not already)
+            # Pull latest code
+            # Fix permissions if directory was created by root (old deploy.sh)
+            sudo chown -R ubuntu:ubuntu /opt/mipham-quant 2>/dev/null || true
             if [ ! -d .git ]; then
               git init
               git remote add origin https://github.com/One-Mipham/mipham-quant.git
