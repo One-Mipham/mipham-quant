@@ -1,0 +1,82 @@
+name: Build Desktop Binaries
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # ── macOS .dmg ──────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: cd apps/frontend && pnpm install --frozen-lockfile && pnpm build
+
+      - name: Build Electron TS
+        run: pnpm electron:build:ts
+
+      - name: Build macOS .dmg
+        run: npx electron-builder --mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Generate SHA256
+        run: shasum -a 256 dist/MiphamQuant-*.dmg > dist/SHA256SUMS.txt
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiphamQuant-macOS
+          path: |
+            dist/MiphamQuant-*.dmg
+            dist/SHA256SUMS.txt
+
+  # ── Windows .exe ────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: cd apps/frontend && pnpm install --frozen-lockfile && pnpm build
+
+      - name: Build Electron TS
+        run: pnpm electron:build:ts
+
+      - name: Build Windows .exe
+        run: npx electron-builder --win
+
+      - name: Upload .exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiphamQuant-Windows
+          path: dist/MiphamQuant-*.exe
