@@ -37,14 +37,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate SHA256
-        run: shasum -a 256 dist/MiphamQuant-*.dmg > dist/SHA256SUMS.txt
+        run: |
+          DMG=$(ls dist/*.dmg | head -1)
+          shasum -a 256 "$DMG" > dist/SHA256SUMS.txt
+          echo "DMG: $DMG"
 
       - name: Upload .dmg artifact
         uses: actions/upload-artifact@v4
         with:
           name: MiphamQuant-macOS
           path: |
-            dist/MiphamQuant-*.dmg
+            dist/*.dmg
             dist/SHA256SUMS.txt
 
   # ── Windows .exe ────────────────────────────────────────────
@@ -82,4 +85,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MiphamQuant-Windows
-          path: dist/MiphamQuant-*.exe
+          path: dist/*.exe
