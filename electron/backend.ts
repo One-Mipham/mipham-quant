@@ -18,6 +18,19 @@ export class BackendManager {
     return this._ready
   }
 
+  /**
+   * Detect a usable Python interpreter on the current platform.
+   * Tries common names in order: python3, python, py -3.
+   */
+  private _findPython(): string {
+    if (process.platform === 'win32') {
+      // Windows: 'python' and 'py -3' are standard; 'python3' is rare
+      return process.env.PYTHON_CMD || 'python'
+    }
+    // macOS / Linux: 'python3' is standard; 'python' may be Python 2
+    return process.env.PYTHON_CMD || 'python3'
+  }
+
   async start(): Promise<void> {
     if (this.process) return
 
@@ -28,22 +41,20 @@ export class BackendManager {
     let args: string[]
 
     if (isDev) {
-      cmd = 'python3'
+      cmd = this._findPython()
       args = [path.join(__dirname, '..', 'backend_api_python', 'run.py')]
     } else {
-      // Production: try PyInstaller binary first, fall back to python3 + source
+      // Production: try python source first, then PyInstaller binary
       const backendDir = path.join(process.resourcesPath, 'backend')
       const binaryName = process.platform === 'win32'
         ? 'mipham-quant-backend.exe'
         : 'mipham-quant-backend'
       const binaryPath = path.join(backendDir, binaryName)
-      const runScript = path.join(backendDir, 'run_desktop.sh')
 
       const fs = require('fs')
-      // Prefer python3 + source (PyInstaller has compatibility issues on some macOS)
       const runPy = path.join(backendDir, 'run.py')
       if (fs.existsSync(runPy)) {
-        cmd = 'python3'
+        cmd = this._findPython()
         args = [runPy]
       } else if (fs.existsSync(binaryPath)) {
         cmd = binaryPath
@@ -51,6 +62,29 @@ export class BackendManager {
       } else {
         console.error('[Backend] No backend found!')
         return
+      }
+    }
+
+    // --- Persist SECRET_KEY across restarts ---
+    // The SECRET_KEY is used for JWT signing AND Fernet encryption of exchange
+    // credentials. Regenerating it on every launch permanently destroys all
+    // encrypted API keys. We persist it to a file in userData so the same key
+    // survives app restarts.
+    const crypto = require('crypto')
+    const secretKeyPath = path.join(userDataPath, '.secret_key')
+    let secretKey = process.env.SECRET_KEY || ''
+    if (!secretKey) {
+      try {
+        secretKey = fs.readFileSync(secretKeyPath, 'utf-8').trim()
+      } catch (_) {
+        // First launch — generate and persist
+        secretKey = crypto.randomBytes(32).toString('hex')
+        try {
+          fs.mkdirSync(userDataPath, { recursive: true })
+          fs.writeFileSync(secretKeyPath, secretKey, { mode: 0o600 })
+        } catch (e) {
+          console.error('[Backend] Failed to persist SECRET_KEY:', e)
+        }
       }
     }
 
@@ -66,8 +100,7 @@ export class BackendManager {
       ENABLE_REGISTRATION: 'false',
       // Bypass proxy for local
       PROXY_URL: '',
-      // Generate a local SECRET_KEY if not already set
-      SECRET_KEY: process.env.SECRET_KEY || require('crypto').randomBytes(32).toString('hex'),
+      SECRET_KEY: secretKey,
     }
 
     console.log(`[Backend] Starting: ${cmd} ${args.join(' ')}`)

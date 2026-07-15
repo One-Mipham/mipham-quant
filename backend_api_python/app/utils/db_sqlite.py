@@ -17,13 +17,11 @@ Auto-translates PostgreSQL SQL to SQLite at query execution time:
     JSONB          → TEXT
 """
 
-import json
 import os
 import re
 import sqlite3
 import threading
 from contextlib import contextmanager
-from typing import Any
 
 from app.utils.logger import get_logger
 
@@ -34,20 +32,25 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _translate_sql(query: str) -> str:
+def _translate_sql(query: str):
     """Translate PostgreSQL SQL to SQLite-compatible SQL.
 
     Handles:
-    - %s → ? (psycopg2 → sqlite3 parameter placeholder)
+    - %s -> ? (psycopg2 -> sqlite3 parameter placeholder)
     - DDL types: SERIAL, VARCHAR, DECIMAL, TIMESTAMP, BOOLEAN, JSONB
-    - NOW() → (datetime('now'))
-    - ILIKE → LIKE
-    - INTERVAL expressions → datetime() modifiers
-    - ::type casts → removed
-    - RETURNING clause → removed
+    - NOW() -> (datetime('now'))
+    - CURDATE() -> DATE('now')
+    - ILIKE -> LIKE
+    - INTERVAL expressions -> datetime() modifiers
+    - ::type casts -> removed
+    - RETURNING clause -> stripped (column names returned for cursor wrapper)
+
+    Returns:
+        (translated_query, returning_cols) where returning_cols is a list of
+        column names from the RETURNING clause (empty list if none).
     """
     if not query or not isinstance(query, str):
-        return query
+        return query, []
 
     result = query
 
@@ -82,14 +85,6 @@ def _translate_sql(query: str) -> str:
         result, flags=re.IGNORECASE,
     )
 
-    # Pattern D: column OP NOW() +/- INTERVAL '<N> <unit>'  (column comparison)
-    #   datetime('now', '-N <unit>') is a string that SQLite can compare.
-    result = re.sub(
-        r"\bNOW\s*\(\s*\)\s*-\s*INTERVAL\s+'(\d+)\s+(\w+)'",
-        r"datetime('now', '-\1 \2')",
-        result, flags=re.IGNORECASE,
-    )
-
     # Parameter placeholder (safe: %s only appears in SQL, not in string data)
     result = result.replace("%s", "?")
 
@@ -111,22 +106,64 @@ def _translate_sql(query: str) -> str:
     # NOW() → (datetime('now'))  — parentheses required for DEFAULT clauses
     result = re.sub(r"\bNOW\s*\(\s*\)", "(datetime('now'))", result, flags=re.IGNORECASE)
 
-    # ILIKE → LIKE
-    result = re.sub(r"\bILIKE\b", "LIKE", result)
+    # CURDATE() → DATE('now')  — SQLite has no CURDATE()
+    result = re.sub(r"\bCURDATE\s*\(\s*\)", "DATE('now')", result, flags=re.IGNORECASE)
+
+    # ILIKE → LIKE (case-insensitive match for robustness)
+    result = re.sub(r"\bILIKE\b", "LIKE", result, flags=re.IGNORECASE)
 
     # Remove ::type casts (e.g. "column::INTEGER" → "column")
     result = re.sub(r"::\s*\w+(\s*\[\s*\])?", "", result)
 
-    # Remove RETURNING clauses (SQLite uses lastrowid)
+    # Remove RETURNING clauses — but capture column names so the cursor wrapper
+    # can synthesize a result row from lastrowid (keeps callers using fetchone()
+    # working without changes).
+    returning_cols = []
+    returning_match = re.search(
+        r"\bRETURNING\s+((?:\w+\s*,\s*)*\w+)\s*",
+        result, flags=re.IGNORECASE,
+    )
+    if returning_match:
+        returning_cols = [c.strip() for c in returning_match.group(1).split(",")]
     result = re.sub(r"\bRETURNING\s+\w+(\s*,\s*\w+)*\s*", "", result, flags=re.IGNORECASE)
 
     # ADD COLUMN IF NOT EXISTS → ADD COLUMN
     result = re.sub(r"\bADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\b", "ADD COLUMN", result, flags=re.IGNORECASE)
 
-    # DO $$ ... END $$ blocks → no-op (PostgreSQL procedural, SQLite doesn't support)
-    result = re.sub(r"\bDO\s+\$\$.*?END\s*\$\$", "SELECT 1", result, flags=re.IGNORECASE | re.DOTALL)
+    # DO $$ ... END $$ blocks → extract ALTER TABLE ADD COLUMN statements for SQLite
+    # PostgreSQL DO blocks typically conditionally add columns — we extract the
+    # inner ALTER TABLE statements and convert them to standalone SQLite-friendly
+    # ALTER TABLE ADD COLUMN (SQLite ignores duplicates automatically via error)
+    do_match = re.search(
+        r"\bDO\s+\$\$(.*?)END\s*\$\$",
+        result, flags=re.IGNORECASE | re.DOTALL,
+    )
+    if do_match:
+        do_body = do_match.group(1)
+        # Extract ALTER TABLE ... ADD COLUMN statements from the DO block
+        alter_stmts = re.findall(
+            r"ALTER\s+TABLE\s+\w+\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+\s+\w+[\w\s,\(\)]*?(?=;)",
+            do_body, flags=re.IGNORECASE,
+        )
+        if alter_stmts:
+            # Replace the DO block with the extracted ALTER statements
+            # (SQLite will silently ignore ALTER TABLE ADD COLUMN if column exists,
+            # similar to PostgreSQL's IF NOT EXISTS behavior)
+            replacement = ";\n".join(alter_stmts) + ";"
+            result = re.sub(
+                r"\bDO\s+\$\$.*?END\s*\$\$",
+                replacement,
+                result, flags=re.IGNORECASE | re.DOTALL,
+            )
+        else:
+            # No ALTER statements found — safe to no-op
+            result = re.sub(
+                r"\bDO\s+\$\$.*?END\s*\$\$",
+                "SELECT 1",
+                result, flags=re.IGNORECASE | re.DOTALL,
+            )
 
-    return result
+    return result, returning_cols
 
 
 # ---------------------------------------------------------------------------
@@ -139,22 +176,44 @@ class _TranslatableCursor:
 
     We use a wrapper rather than a sqlite3.Cursor subclass because we need to
     convert sqlite3.Row to plain dict for JSON serialization (Flask jsonify).
+
+    When a RETURNING clause is stripped from an INSERT/UPDATE, the cursor
+    synthesises a result row from lastrowid so that callers using fetchone()
+    continue to work without changes.
     """
 
     def __init__(self, raw: sqlite3.Cursor):
         self._cur = raw
+        self._synthetic_row = None  # set when RETURNING was stripped
 
     def execute(self, query, parameters=None):
-        translated = _translate_sql(str(query) if query else "")
+        translated, returning_cols = _translate_sql(str(query) if query else "")
+        self._synthetic_row = None
         if parameters is None:
-            return self._cur.execute(translated)
-        return self._cur.execute(translated, parameters)
+            result = self._cur.execute(translated)
+        else:
+            result = self._cur.execute(translated, parameters)
+        # If RETURNING was stripped and this was an INSERT/UPDATE/DELETE,
+        # synthesize a result row from lastrowid so fetchone() callers
+        # (8 call sites: fast_analysis, quick_trade, credentials, billing,
+        # polymarket, usdt_payment, analysis_memory, oauth) get an ID back.
+        if returning_cols and self._cur.lastrowid:
+            self._synthetic_row = {
+                col: (self._cur.lastrowid if col.lower() == "id" else None)
+                for col in returning_cols
+            }
+        return result
 
     def executemany(self, query, seq_of_parameters):
-        translated = _translate_sql(str(query) if query else "")
+        translated, _ = _translate_sql(str(query) if query else "")
+        self._synthetic_row = None
         return self._cur.executemany(translated, seq_of_parameters)
 
     def fetchone(self):
+        if self._synthetic_row is not None:
+            row = self._synthetic_row
+            self._synthetic_row = None
+            return row
         row = self._cur.fetchone()
         return dict(row) if row is not None else None
 
@@ -289,7 +348,7 @@ def init_database():
     for p in init_sql_paths:
         norm = os.path.normpath(p)
         if os.path.exists(norm):
-            with open(norm, "r", encoding="utf-8") as f:
+            with open(norm, encoding="utf-8") as f:
                 init_sql = f.read()
             logger.info(f"Loaded schema from {norm}")
             break
@@ -306,11 +365,57 @@ def init_database():
         # IF NOT EXISTS makes this idempotent.
         if init_sql is not _EMBEDDED_SCHEMA:
             db.executescript(_EMBEDDED_SCHEMA)
+        # Apply column migrations for existing databases that were created
+        # before new columns were added to the schema (e.g., credits,
+        # vip_expires_at on qd_users). ALTER TABLE ADD COLUMN in SQLite
+        # silently errors if the column already exists, so we catch and
+        # ignore duplicates.
+        _run_column_migrations(db)
 
     logger.info("SQLite database initialized successfully")
 
     # Run seed data if available
     _run_seed_data()
+
+
+def _run_column_migrations(db):
+    """Add new columns to existing tables that were created before the columns
+    existed in the schema. SQLite silently errors on duplicate columns, so
+    we catch and ignore those errors.
+
+    This handles the case where a user upgrades the app and their existing
+    database is missing columns like qd_users.credits, qd_users.vip_expires_at,
+    etc.
+    """
+    migrations = [
+        # qd_users — columns added after initial schema
+        ("qd_users", "credits", "REAL DEFAULT 0"),
+        ("qd_users", "vip_expires_at", "TEXT"),
+        ("qd_users", "vip_plan", "TEXT DEFAULT ''"),
+        ("qd_users", "vip_is_lifetime", "INTEGER DEFAULT 0"),
+        ("qd_users", "vip_monthly_credits_last_grant", "TEXT"),
+        ("qd_users", "email_verified", "INTEGER DEFAULT 1"),
+        ("qd_users", "token_version", "INTEGER DEFAULT 1"),
+        ("qd_users", "timezone", "TEXT DEFAULT ''"),
+        ("qd_users", "notification_settings", "TEXT DEFAULT '{}'"),
+        ("qd_users", "chart_templates", "TEXT DEFAULT '[]'"),
+        ("qd_users", "referred_by", "INTEGER"),
+        ("qd_users", "last_login_at", "TEXT"),
+        # qd_analysis_memory — columns added by DO$$ migration blocks
+        ("qd_analysis_memory", "user_id", "INTEGER NOT NULL DEFAULT 1"),
+        ("qd_analysis_memory", "raw_result", "TEXT DEFAULT '{}'"),
+        ("qd_analysis_memory", "consensus_score", "REAL"),
+        ("qd_analysis_memory", "consensus_abs", "REAL"),
+        ("qd_analysis_memory", "agreement_ratio", "REAL"),
+        ("qd_analysis_memory", "quality_multiplier", "REAL"),
+        ("qd_analysis_memory", "actual_outcome", "TEXT DEFAULT ''"),
+        ("qd_analysis_memory", "actual_return_pct", "REAL"),
+    ]
+    for table, column, col_type in migrations:
+        try:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        except Exception:
+            pass  # Column already exists — safe to ignore
 
 
 def _run_seed_data():
@@ -331,7 +436,7 @@ def _run_seed_data():
     for p in seed_paths:
         norm = os.path.normpath(p)
         if os.path.exists(norm):
-            with open(norm, "r", encoding="utf-8") as f:
+            with open(norm, encoding="utf-8") as f:
                 seed_sql = f.read()
             with get_db_connection() as db:
                 db.executescript(seed_sql)

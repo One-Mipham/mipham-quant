@@ -1198,14 +1198,15 @@ def test_connection():
             api_key = resolved.get("api_key", "")
             secret_key = resolved.get("secret_key", "")
 
-            # 详细日志排查
-            logger.info(f"Testing connection: exchange_id={resolved.get('exchange_id')}")
-            if api_key:
-                logger.info(f"API Key: {api_key[:5]}... (len={len(api_key)})")
-            if secret_key:
-                logger.info(f"Secret Key: {secret_key[:5]}... (len={len(secret_key)})")
+            # Log connection test without exposing credential material
+            logger.info(
+                "Testing connection: exchange_id=%s api_key_provided=%s secret_key_provided=%s",
+                resolved.get("exchange_id"),
+                bool(api_key),
+                bool(secret_key),
+            )
 
-            # 检查是否有特殊字符
+            # Validate credential format (no leading/trailing whitespace)
             if api_key and api_key.strip() != api_key:
                 logger.warning("API key contains leading/trailing whitespace")
             if secret_key and secret_key.strip() != secret_key:

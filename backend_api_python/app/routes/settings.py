@@ -103,8 +103,8 @@ CONFIG_SCHEMA = {
                 "key": "ADMIN_PASSWORD",
                 "label": "Admin Password",
                 "type": "password",
-                "default": "123456",
-                "description": "Administrator login password. MUST change in production",
+                "default": "",
+                "description": "Administrator login password. Auto-generated in desktop mode. Required in multi-user mode.",
             },
             {
                 "key": "ADMIN_EMAIL",
