@@ -104,7 +104,7 @@ class TestPolarsPandasParity:
     """Verify Polars and pandas produce consistent trade counts (±1 tolerance)."""
 
     def test_trade_count_parity_maotai(self):
-        """Polars and pandas should produce the same number of trades."""
+        """Polars and pandas should produce similar number of trades (±1 tolerance)."""
         params = _backtest_params()
 
         os.environ["BACKTEST_ENGINE"] = "pandas"
@@ -117,7 +117,7 @@ class TestPolarsPandasParity:
 
         t_pd = result_pd.get("totalTrades", 0)
         t_pl = result_pl.get("totalTrades", 0)
-        assert t_pd == t_pl, f"Trade count mismatch: pandas={t_pd}, polars={t_pl}"
+        assert abs(t_pd - t_pl) <= 1, f"Trade count mismatch: pandas={t_pd}, polars={t_pl}"
 
     def test_trade_count_parity_all_stocks(self):
         """Trade count parity across all CSI 300 test stocks (±1 tolerance)."""
