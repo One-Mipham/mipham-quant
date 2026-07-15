@@ -253,7 +253,7 @@ def create_app(config_name="default"):
 
     # Initialize database (PostgreSQL or SQLite depending on DB_TYPE)
     try:
-        from app.utils.db import init_database, get_db_type
+        from app.utils.db import get_db_type, init_database
 
         logger.info(f"Database type: {get_db_type()}")
         init_database()

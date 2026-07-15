@@ -2,12 +2,26 @@
 # ================================================================
 # Mipham Quant 线上版 — 腾讯云生产部署
 # ================================================================
-# 服务器: 192.144.235.27 (2C/2GB/40GB 腾讯云 CVM)
 # 子域名: quant.onemipham.com
+#
+# 环境变量 (部署前必须设置):
+#   DEPLOY_SERVER    — 服务器地址 (如 root@192.168.1.1)
+#   ADMIN_USER       — 管理员用户名
+#   ADMIN_PASSWORD   — 管理员密码
 # ================================================================
 set -e
 
-SERVER="root@192.144.235.27"
+if [ -z "$DEPLOY_SERVER" ]; then
+  echo "❌ DEPLOY_SERVER 未设置。用法: DEPLOY_SERVER=root@<ip> ADMIN_USER=... ADMIN_PASSWORD=... ./deploy.sh"
+  exit 1
+fi
+if [ -z "$ADMIN_PASSWORD" ]; then
+  echo "❌ ADMIN_PASSWORD 未设置"
+  exit 1
+fi
+
+SERVER="$DEPLOY_SERVER"
+ADMIN_USER="${ADMIN_USER:-admin}"
 REMOTE_DIR="/opt/mipham-quant"
 
 echo "========================================="
@@ -46,8 +60,8 @@ if [ ! -f backend_api_python/.env ]; then
   cp backend_api_python/env.example backend_api_python/.env
   NEW_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
   sed -i "s/SECRET_KEY=.*/SECRET_KEY=${NEW_KEY}/" backend_api_python/.env
-  sed -i "s/ADMIN_USER=.*/ADMIN_USER=mipham/" backend_api_python/.env
-  sed -i "s/ADMIN_PASSWORD=.*/ADMIN_PASSWORD=mipham2026/" backend_api_python/.env
+  sed -i "s/ADMIN_USER=.*/ADMIN_USER=${ADMIN_USER}/" backend_api_python/.env
+  sed -i "s/ADMIN_PASSWORD=.*/ADMIN_PASSWORD=${ADMIN_PASSWORD}/" backend_api_python/.env
   sed -i "s/DEBUG=.*/DEBUG=false/" backend_api_python/.env
   echo "  ✅ .env 已生成 (生产模式)"
 else
@@ -119,7 +133,7 @@ echo "  部署完成"
 echo "  🌐 https://quant.onemipham.com"
 echo "  ❤️  http://192.144.235.27:5010/api/health"
 echo ""
-echo "  登录: mipham / mipham2026"
+echo "  登录: ${ADMIN_USER} / (see ADMIN_PASSWORD env var)"
 echo "========================================="
 
 # 快速验证

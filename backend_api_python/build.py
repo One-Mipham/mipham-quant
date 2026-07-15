@@ -22,7 +22,9 @@ def build():
         _generate_spec()
 
     cmd = [
-        sys.executable, "-m", "PyInstaller",
+        sys.executable,
+        "-m",
+        "PyInstaller",
         "--clean",
         "--noconfirm",
         spec_file,
@@ -117,7 +119,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # Show console for logs
+    console=False,  # Hide console for release builds (Windows)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

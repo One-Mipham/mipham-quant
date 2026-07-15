@@ -6,7 +6,6 @@ Supports multi-user authentication with role-based access control.
 """
 
 import datetime
-import os
 from functools import wraps
 
 import jwt

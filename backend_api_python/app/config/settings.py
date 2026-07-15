@@ -46,45 +46,42 @@ class MetaConfig(type):
         key = os.getenv("SECRET_KEY", "").strip()
         if not key:
             import secrets
+
             key = secrets.token_hex(32)
             os.environ["SECRET_KEY"] = key
         return key
 
     @property
     def ADMIN_USER(cls):
-        # Desktop: generate random admin username on first launch
-        if os.getenv("DB_TYPE", "").lower() == "sqlite":
-            return os.getenv("ADMIN_USER", "admin")
         val = os.getenv("ADMIN_USER", "").strip()
         if not val:
-            raise RuntimeError(
-                "ADMIN_USER environment variable is required in multi-user mode. "
-                "Set ADMIN_USER to the admin account username."
+            if os.getenv("DB_TYPE", "").lower() == "sqlite":
+                return "admin"
+            # Multi-user mode: warn but don't crash — existing deployments
+            # may rely on the previous default.
+            import logging
+
+            logging.getLogger("mipham").warning(
+                "ADMIN_USER not set in environment — using default 'admin'. Set ADMIN_USER in .env for production."
             )
+            return "admin"
         return val
 
     @property
     def ADMIN_PASSWORD(cls):
-        # Desktop: auto-generate random password on first launch, persisted via SECRET_KEY mechanism
-        if os.getenv("DB_TYPE", "").lower() == "sqlite":
+        pwd = os.getenv("ADMIN_PASSWORD", "").strip()
+        if not pwd:
             import secrets
-            pwd = os.getenv("ADMIN_PASSWORD", "").strip()
-            if not pwd:
-                pwd = secrets.token_urlsafe(16)
-                os.environ["ADMIN_PASSWORD"] = pwd
-                # Log once so the desktop app can capture and display it
-                import logging
-                logging.getLogger("mipham").warning(
-                    "Generated random admin password. Save this password to regain access."
-                )
-            return pwd
-        val = os.getenv("ADMIN_PASSWORD", "").strip()
-        if not val:
-            raise RuntimeError(
-                "ADMIN_PASSWORD environment variable is required in multi-user mode. "
-                "Set a strong ADMIN_PASSWORD for the admin account."
+
+            pwd = secrets.token_urlsafe(16)
+            os.environ["ADMIN_PASSWORD"] = pwd
+            import logging
+
+            logging.getLogger("mipham").warning(
+                "ADMIN_PASSWORD not set — generated random password for this session. "
+                "Set ADMIN_PASSWORD in .env for persistent admin access."
             )
-        return val
+        return pwd
 
     # ==================== 日志配置 ====================
     # 日志配置通常在应用启动最早阶段需要，建议保持环境变量

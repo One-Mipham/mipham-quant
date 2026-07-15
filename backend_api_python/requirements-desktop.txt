@@ -12,3 +12,4 @@ pyjwt>=2.8
 cryptography>=43.0
 bip-utils>=2.7
 pycryptodome>=3.20
+akshare>=1.14.0

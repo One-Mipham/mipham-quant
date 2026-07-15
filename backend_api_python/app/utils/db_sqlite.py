@@ -60,12 +60,14 @@ def _translate_sql(query: str):
     result = re.sub(
         r"\bNOW\s*\(\s*\)\s*\+\s*INTERVAL\s+'%s\s+(\w+)'",
         r"datetime('now', '+' || %s || ' \1')",
-        result, flags=re.IGNORECASE,
+        result,
+        flags=re.IGNORECASE,
     )
     result = re.sub(
         r"\bNOW\s*\(\s*\)\s*-\s*INTERVAL\s+'%s\s+(\w+)'",
         r"datetime('now', '-' || %s || ' \1')",
-        result, flags=re.IGNORECASE,
+        result,
+        flags=re.IGNORECASE,
     )
     # Pattern B: column +/- INTERVAL '%s <unit>' (generic, no NOW())
     #   → datetime(column, '+' || %s || ' <unit>')
@@ -77,12 +79,14 @@ def _translate_sql(query: str):
     result = re.sub(
         r"\bNOW\s*\(\s*\)\s*\+\s*INTERVAL\s+'(\d+)\s+(\w+)'",
         r"datetime('now', '+\1 \2')",
-        result, flags=re.IGNORECASE,
+        result,
+        flags=re.IGNORECASE,
     )
     result = re.sub(
         r"\bNOW\s*\(\s*\)\s*-\s*INTERVAL\s+'(\d+)\s+(\w+)'",
         r"datetime('now', '-\1 \2')",
-        result, flags=re.IGNORECASE,
+        result,
+        flags=re.IGNORECASE,
     )
 
     # Parameter placeholder (safe: %s only appears in SQL, not in string data)
@@ -121,7 +125,8 @@ def _translate_sql(query: str):
     returning_cols = []
     returning_match = re.search(
         r"\bRETURNING\s+((?:\w+\s*,\s*)*\w+)\s*",
-        result, flags=re.IGNORECASE,
+        result,
+        flags=re.IGNORECASE,
     )
     if returning_match:
         returning_cols = [c.strip() for c in returning_match.group(1).split(",")]
@@ -136,14 +141,16 @@ def _translate_sql(query: str):
     # ALTER TABLE ADD COLUMN (SQLite ignores duplicates automatically via error)
     do_match = re.search(
         r"\bDO\s+\$\$(.*?)END\s*\$\$",
-        result, flags=re.IGNORECASE | re.DOTALL,
+        result,
+        flags=re.IGNORECASE | re.DOTALL,
     )
     if do_match:
         do_body = do_match.group(1)
         # Extract ALTER TABLE ... ADD COLUMN statements from the DO block
         alter_stmts = re.findall(
             r"ALTER\s+TABLE\s+\w+\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+\s+\w+[\w\s,\(\)]*?(?=;)",
-            do_body, flags=re.IGNORECASE,
+            do_body,
+            flags=re.IGNORECASE,
         )
         if alter_stmts:
             # Replace the DO block with the extracted ALTER statements
@@ -153,14 +160,16 @@ def _translate_sql(query: str):
             result = re.sub(
                 r"\bDO\s+\$\$.*?END\s*\$\$",
                 replacement,
-                result, flags=re.IGNORECASE | re.DOTALL,
+                result,
+                flags=re.IGNORECASE | re.DOTALL,
             )
         else:
             # No ALTER statements found — safe to no-op
             result = re.sub(
                 r"\bDO\s+\$\$.*?END\s*\$\$",
                 "SELECT 1",
-                result, flags=re.IGNORECASE | re.DOTALL,
+                result,
+                flags=re.IGNORECASE | re.DOTALL,
             )
 
     return result, returning_cols
@@ -199,8 +208,7 @@ class _TranslatableCursor:
         # polymarket, usdt_payment, analysis_memory, oauth) get an ID back.
         if returning_cols and self._cur.lastrowid:
             self._synthetic_row = {
-                col: (self._cur.lastrowid if col.lower() == "id" else None)
-                for col in returning_cols
+                col: (self._cur.lastrowid if col.lower() == "id" else None) for col in returning_cols
             }
         return result
 
@@ -254,6 +262,7 @@ class _TranslatableConnection(sqlite3.Connection):
     def cursor(self, factory=None):
         raw = super().cursor()
         return _TranslatableCursor(raw)
+
 
 # Default DB path: same directory as this file's grandparent (backend_api_python/)
 # In production, set DB_PATH env var to Electron's userData directory.
@@ -335,13 +344,12 @@ def init_database():
     Also seeds default user row.
     """
     init_sql_paths = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
-                     "migrations", "init_sqlite.sql"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
-                     "..", "migrations", "init_sqlite.sql"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "migrations", "init_sqlite.sql"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "migrations", "init_sqlite.sql"),
         # PyInstaller: resources are next to the binary
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
-                     "..", "..", "migrations", "init_sqlite.sql"),
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "migrations", "init_sqlite.sql"
+        ),
     ]
 
     init_sql = None
@@ -429,8 +437,7 @@ def _run_seed_data():
 
     seed_paths = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "seed.sql"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
-                     "app", "data", "seed.sql"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "app", "data", "seed.sql"),
     ]
 
     for p in seed_paths:
@@ -460,6 +467,7 @@ def close_db_connection():
 # ---------------------------------------------------------------------------
 # Type conversion helpers (SQLite stores everything as primitive types)
 # ---------------------------------------------------------------------------
+
 
 def _convert_row(row: sqlite3.Row | dict | None) -> dict | None:
     """Convert a sqlite3.Row to a plain dict for API consumers."""

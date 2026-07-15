@@ -21,12 +21,36 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,  // preload needs Node.js API access for IPC
     },
-    // macOS: hide instead of close
+    // macOS: custom title bar (traffic-light-safe with CSS padding)
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset' }
+      ? {
+          titleBarStyle: 'hiddenInset',
+          trafficLightPosition: { x: 12, y: 16 },
+        }
       : {}),
   })
+
+  // Content-Security-Policy: restrict script sources to prevent XSS
+  // exfiltration of auth tokens from localStorage.
+  mainWindow.webContents.session.defaultSession.webRequest.onHeadersReceived(
+    (_details, callback) => {
+      callback({
+        responseHeaders: {
+          ..._details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: https:; " +
+            "connect-src 'self' http://127.0.0.1:5000; " +
+            "font-src 'self' data:;",
+          ],
+        },
+      })
+    },
+  )
 
   // Load frontend
   const isDev = process.env.NODE_ENV === 'development'

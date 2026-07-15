@@ -6,8 +6,7 @@ import { app } from 'electron'
 const BACKEND_PORT = 5000
 const HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/api/health`
 const MAX_RETRIES = 3
-const HEALTH_POLL_MS = 500
-const HEALTH_TIMEOUT_MS = 30000
+const HEALTH_TIMEOUT_MS = 60000  // Allow 60s for cold-start Python imports
 
 export class BackendManager {
   private process: ChildProcess | null = null
@@ -111,12 +110,23 @@ export class BackendManager {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
+    // Log backend output to both console and a file for diagnostics
+    const logDir = path.join(userDataPath, 'logs')
+    try { fs.mkdirSync(logDir, { recursive: true }) } catch (_) { /* ignore */ }
+    const logStream = fs.createWriteStream(path.join(logDir, 'backend.log'), { flags: 'a' })
+
+    const writeLog = (prefix: string, data: Buffer) => {
+      const line = `[${new Date().toISOString()}] ${prefix} ${data.toString().trim()}\n`
+      console.log(line.trim())
+      try { logStream.write(line) } catch (_) { /* ignore */ }
+    }
+
     this.process.stdout?.on('data', (data: Buffer) => {
-      console.log(`[Backend] ${data.toString().trim()}`)
+      writeLog('[Backend]', data)
     })
 
     this.process.stderr?.on('data', (data: Buffer) => {
-      console.error(`[Backend:err] ${data.toString().trim()}`)
+      writeLog('[Backend:err]', data)
     })
 
     this.process.on('exit', (code, signal) => {
@@ -125,8 +135,10 @@ export class BackendManager {
       if (code !== 0 && code !== null) {
         this.crashCount++
         if (this.crashCount < MAX_RETRIES) {
-          console.log(`[Backend] Auto-restart attempt ${this.crashCount}/${MAX_RETRIES}`)
-          setTimeout(() => this.start(), 2000)
+          // Exponential backoff: 2s, 4s, 8s
+          const delay = 2000 * Math.pow(2, this.crashCount - 1)
+          console.log(`[Backend] Auto-restart attempt ${this.crashCount}/${MAX_RETRIES} in ${delay}ms`)
+          setTimeout(() => this.start(), delay)
         }
       }
     })
@@ -167,10 +179,11 @@ export class BackendManager {
   private _waitForHealth(): Promise<void> {
     return new Promise((resolve, reject) => {
       const startTime = Date.now()
+      let delay = 200  // Start at 200ms, exponential backoff to max 2s
 
       const poll = () => {
         if (Date.now() - startTime > HEALTH_TIMEOUT_MS) {
-          reject(new Error('Backend health check timed out'))
+          reject(new Error(`Backend health check timed out after ${HEALTH_TIMEOUT_MS / 1000}s`))
           return
         }
 
@@ -181,10 +194,12 @@ export class BackendManager {
             console.log('[Backend] Ready!')
             resolve()
           } else {
-            setTimeout(poll, HEALTH_POLL_MS)
+            delay = Math.min(delay * 2, 2000)
+            setTimeout(poll, delay)
           }
         }).on('error', () => {
-          setTimeout(poll, HEALTH_POLL_MS)
+          delay = Math.min(delay * 2, 2000)
+          setTimeout(poll, delay)
         })
       }
 

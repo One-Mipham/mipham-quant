@@ -129,6 +129,26 @@ jobs:
           path: frontend/dist/
 
   # =========================================================================
+  # Electron: TypeScript compilation check
+  # =========================================================================
+  electron:
+    name: Electron (TS check)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies (root)
+        run: npm install --ignore-scripts
+
+      - name: TypeScript check (electron/)
+        run: npx tsc --noEmit -p electron/tsconfig.json
+
+  # =========================================================================
   # Docker build check
   # =========================================================================
   docker:

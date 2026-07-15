@@ -42,11 +42,16 @@ jobs:
             git checkout main
             git reset --hard origin/main
 
-            # Generate secure SECRET_KEY if not already set
+            # Generate secure credentials if not already set
             if ! grep -q "^SECRET_KEY=" backend_api_python/.env 2>/dev/null; then
               NEW_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
               echo "SECRET_KEY=$NEW_KEY" >> backend_api_python/.env
               echo ">>> Generated new SECRET_KEY"
+            fi
+            if ! grep -q "^ADMIN_PASSWORD=" backend_api_python/.env 2>/dev/null; then
+              NEW_PWD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+              echo "ADMIN_PASSWORD=$NEW_PWD" >> backend_api_python/.env
+              echo ">>> Generated new ADMIN_PASSWORD"
             fi
 
             # Rebuild and restart
