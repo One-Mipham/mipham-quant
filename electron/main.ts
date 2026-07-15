@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, ipcMain } from 'electron'
+import { app, BrowserWindow, screen, ipcMain, session } from 'electron'
 import * as path from 'path'
 import { BackendManager } from './backend'
 import { activateLicense, checkLicense, getLicenseInfo, isActivated } from './license'
@@ -34,11 +34,11 @@ function createWindow(): void {
 
   // Content-Security-Policy: restrict script sources to prevent XSS
   // exfiltration of auth tokens from localStorage.
-  mainWindow.webContents.session.defaultSession.webRequest.onHeadersReceived(
-    (_details, callback) => {
+  session.defaultSession.webRequest.onHeadersReceived(
+    (details: Electron.OnHeadersReceivedListenerDetails, callback: (response: Electron.HeadersReceivedResponse) => void) => {
       callback({
         responseHeaders: {
-          ..._details.responseHeaders,
+          ...details.responseHeaders,
           'Content-Security-Policy': [
             "default-src 'self'; " +
             "script-src 'self'; " +

@@ -1,6 +1,8 @@
 import { spawn, ChildProcess } from 'child_process'
-import * as path from 'path'
+import * as crypto from 'crypto'
+import * as fs from 'fs'
 import * as http from 'http'
+import * as path from 'path'
 import { app } from 'electron'
 
 const BACKEND_PORT = 5000
@@ -50,7 +52,6 @@ export class BackendManager {
         : 'mipham-quant-backend'
       const binaryPath = path.join(backendDir, binaryName)
 
-      const fs = require('fs')
       const runPy = path.join(backendDir, 'run.py')
       if (fs.existsSync(runPy)) {
         cmd = this._findPython()
