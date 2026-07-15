@@ -34,6 +34,7 @@ jobs:
         run: npx electron-builder --mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate SHA256
         run: shasum -a 256 dist/MiphamQuant-*.dmg > dist/SHA256SUMS.txt
@@ -74,6 +75,8 @@ jobs:
 
       - name: Build Windows .exe
         run: npx electron-builder --win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload .exe artifact
         uses: actions/upload-artifact@v4
