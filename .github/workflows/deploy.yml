@@ -37,10 +37,14 @@ jobs:
             set -e
             cd /opt/mipham-quant
 
-            # Pull latest code
+            # Pull latest code (first-run: init git repo if not already)
+            if [ ! -d .git ]; then
+              git init
+              git remote add origin https://github.com/One-Mipham/mipham-quant.git
+            fi
             git fetch origin main
-            git checkout main
             git reset --hard origin/main
+            git clean -fd  # remove untracked files that conflict
 
             # Generate secure credentials if not already set
             if ! grep -q "^SECRET_KEY=" backend_api_python/.env 2>/dev/null; then
